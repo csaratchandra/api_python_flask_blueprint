@@ -1,10 +1,10 @@
 from app.api import bp
 import pandas as pd
-import glob
-import os
 from flask import jsonify
 from app.api.errors import error_response
-import json
+
+# trans file and transaction file locations are stored in trans_file
+from .trans_file import process_file
 
 
 @bp.route('/transaction/<int:transaction_id>', methods=['GET'])
@@ -17,44 +17,31 @@ def get_transaction(transaction_id):
      transaction_id : integer, required
          Transaction id about which information is requested.
     """   
-    # Multiple File Handling
-    appended_data = []
-    api_dir = os.path.dirname(__file__)
     
-    trans_file_path = os.path.join(api_dir, 'data/transaction/')
-    ref_file_path   = os.path.join(api_dir, 'data/reference/')
-
-    all_trans_files = glob.glob(trans_file_path + '*.csv')
+    # File processing
+    product_reference_file = 'ProductReference.csv'
+    all_trans_files        = '*.csv'
+    trans_data,ref_data = process_file(all_trans_files,product_reference_file)
     
-
-    for a_file in all_trans_files:
-        read_data = pd.read_csv(a_file, index_col=None, header=0)
-        appended_data.append(read_data)
-    
-    ref_data = pd.read_csv(ref_file_path + 'ProductReference.csv')
-        
-    df = pd.concat(appended_data, axis=0, ignore_index=True)
-    df = df[df.transactionId == transaction_id]
-
-    
-    if df.empty:
+    if trans_data.empty:
         return error_response(404)
     else:
+
+        # Filtering on transaction id sent in request.
+        trans_data = trans_data[trans_data.transactionId == transaction_id]
 
         # There is no mention of unique transaction id in the assignment,
         # but assuming ids will be unique and dropping duplicates on them 
         # duplicates are here due to test data.
-
-        df = df.drop_duplicates(subset='transactionId', keep='last',inplace=False)
+        trans_data = trans_data.drop_duplicates(subset='transactionId', keep='last',inplace=False)
         
-        df = pd.merge(df,ref_data,on='productId',how='left',indicator=True)
-        df = df[['transactionId', 'productName', 'transactionAmount', 'transactionDatetime']]
-        payload = df.to_dict('records')        
-
-        print(payload[0])
+        # Preparing response to send back
+        trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
+        trans_data = trans_data[['transactionId', 'productName', 'transactionAmount', 'transactionDatetime']]
+        payload = trans_data.to_dict('records')        
 
         return jsonify(payload[0])
- # """   
+
     
 @bp.route('/transactionSummaryByProducts/<int:last_n_days>', methods=['GET'])
 def get_product_summary(last_n_days):
@@ -65,36 +52,28 @@ def get_product_summary(last_n_days):
     ----------
     last_n_days : integer, required
         Denotes days, used to provide transaction summary at product level for provided days.
-    """    
-    # Multiple File Handling
-    appended_data = []
-    api_dir = os.path.dirname(__file__)
-    
-    trans_file_path = os.path.join(api_dir, 'data/transaction/')
-    ref_file_path   = os.path.join(api_dir, 'data/reference/')
+    """
+    # File processing    
+    product_reference_file = 'ProductReference.csv'
+    all_trans_files        = '*.csv'
+    trans_data,ref_data = process_file(all_trans_files,product_reference_file)
 
-    all_trans_files = glob.glob(trans_file_path + '*.csv')
-    
+    if trans_data.empty:
+        return error_response(404)
+    else:
+        # Determining cutoff_data based on the # of days sent in request.
+        trans_data['transactionDatetime'] = trans_data['transactionDatetime'].astype('datetime64[ns]')
+        cutoff_date = trans_data['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
 
-    for a_file in all_trans_files:
-        read_data = pd.read_csv(a_file, index_col=None, header=0)
-        appended_data.append(read_data)
-    
-    ref_data = pd.read_csv(ref_file_path + 'ProductReference.csv')
+        # Processing to determine transaction amount summary at product level
+        trans_data = trans_data[trans_data.transactionDatetime > cutoff_date] 
+        trans_data = pd.DataFrame(trans_data.groupby('productId').transactionAmount.sum())
+        trans_data = trans_data.reset_index()
+        trans_data = trans_data.rename(columns={'transactionAmount':'totalAmount'})
+        trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
+        trans_data = trans_data[['productName', 'totalAmount']]
         
-    df = pd.concat(appended_data, axis=0, ignore_index=True)
-    
-    df['transactionDatetime'] = df['transactionDatetime'].astype('datetime64[ns]')
-    cutoff_date = df['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
-    df = df[df.transactionDatetime > cutoff_date] 
-    df = pd.DataFrame(df.groupby('productId').transactionAmount.sum())
-    df = df.reset_index()
-    df = df.rename(columns={'transactionAmount':'totalAmount'})
-    df = pd.merge(df,ref_data,on='productId',how='left',indicator=True)
-    df = df[['productName', 'totalAmount']]
-
-    print(df)
-    return jsonify(summary=df.to_dict('records'))
+        return jsonify(summary=trans_data.to_dict('records'))
 
 @bp.route('/transactionSummaryByManufacturingCity/<int:last_n_days>', methods=['GET'])
 def get_transaction_summary(last_n_days):
@@ -106,32 +85,23 @@ def get_transaction_summary(last_n_days):
     last_n_days : integer, required
         Denotes days, used to provide transaction summary at city level for provided days.
     """
-        # Multiple File Handling
-    appended_data = []
-    api_dir = os.path.dirname(__file__)
-    
-    trans_file_path = os.path.join(api_dir, 'data/transaction/')
-    ref_file_path   = os.path.join(api_dir, 'data/reference/')
+    # File processing
+    product_reference_file = 'ProductReference.csv'
+    all_trans_files        = '*.csv'
+    trans_data,ref_data = process_file(all_trans_files,product_reference_file)
 
-    all_trans_files = glob.glob(trans_file_path + '*.csv')
-    
-
-    for a_file in all_trans_files:
-        read_data = pd.read_csv(a_file, index_col=None, header=0)
-        appended_data.append(read_data)
-    
-    ref_data = pd.read_csv(ref_file_path + 'ProductReference.csv')
+    if trans_data.empty:
+        return error_response(404)
+    else:
+        # Determining cutoff_data based on the # of days sent in request.
+        trans_data['transactionDatetime'] = trans_data['transactionDatetime'].astype('datetime64[ns]')
+        cutoff_date = trans_data['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
         
-    df = pd.concat(appended_data, axis=0, ignore_index=True)
-
-    df['transactionDatetime'] = df['transactionDatetime'].astype('datetime64[ns]')
-    cutoff_date = df['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
-    df = df[df.transactionDatetime > cutoff_date] 
-
-    df = pd.merge(df,ref_data,on='productId',how='left',indicator=True)
-    df = pd.DataFrame(df.groupby('productManufacturingCity').transactionAmount.sum())
-    df = df.reset_index()
-    df = df.rename(columns={"productManufacturingCity":"cityName","transactionAmount":"totalAmount"})
-    print(df)
-    
-    return jsonify(summary=df.to_dict('records'))
+        # Processing to determine transaction amount summary at city level
+        trans_data = trans_data[trans_data.transactionDatetime > cutoff_date] 
+        trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
+        trans_data = pd.DataFrame(trans_data.groupby('productManufacturingCity').transactionAmount.sum())
+        trans_data = trans_data.reset_index()
+        trans_data = trans_data.rename(columns={"productManufacturingCity":"cityName","transactionAmount":"totalAmount"})
+        
+        return jsonify(summary=trans_data.to_dict('records'))
