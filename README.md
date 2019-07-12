@@ -37,3 +37,8 @@ API implementation using python, flask and blueprint
 
 ### 2) Very basic error handling
   Code is present in app_api/app/errors, error handling is basic as error handling specifc to APIs is also present in that specific module.
+  
+### Future Improvements:
+  - This code takes input data from a folder which is the landing folder for streaming content. In future, a script can be created to segregate landing folder and app input folder.
+  - Currently when there is an error, HTTP error codes are sent in response. Custom error codes can be added to the code to give more detailed error information.
+  - Logging can also be added.
