@@ -2,6 +2,7 @@ from app.api import bp
 import pandas as pd
 from flask import jsonify
 from app.api.errors import error_response
+from datetime import datetime, timedelta
 
 # trans file and transaction file locations are stored in trans_file
 from .trans_file import process_file
@@ -62,18 +63,21 @@ def get_product_summary(last_n_days):
         return error_response(404)
     else:
         # Determining cutoff_data based on the # of days sent in request.
-        trans_data['transactionDatetime'] = trans_data['transactionDatetime'].astype('datetime64[ns]')
-        cutoff_date = trans_data['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
+        trans_data['transactionDatetime'] = pd.to_datetime(trans_data['transactionDatetime'])
+        cutoff_date = (datetime.now() - timedelta(days=last_n_days))
+        
 
         # Processing to determine transaction amount summary at product level
         trans_data = trans_data[trans_data.transactionDatetime > cutoff_date] 
-        trans_data = pd.DataFrame(trans_data.groupby('productId').transactionAmount.sum())
-        trans_data = trans_data.reset_index()
-        trans_data = trans_data.rename(columns={'transactionAmount':'totalAmount'})
-        trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
-        trans_data = trans_data[['productName', 'totalAmount']]
-        
-        return jsonify(summary=trans_data.to_dict('records'))
+        if trans_data.empty:
+            return error_response(404)
+        else:
+            trans_data = pd.DataFrame(trans_data.groupby('productId').transactionAmount.sum())
+            trans_data = trans_data.reset_index()
+            trans_data = trans_data.rename(columns={'transactionAmount':'totalAmount'})
+            trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
+            trans_data = trans_data[['productName', 'totalAmount']]
+            return jsonify(summary=trans_data.to_dict('records'))
 
 @bp.route('/transactionSummaryByManufacturingCity/<int:last_n_days>', methods=['GET'])
 def get_transaction_summary(last_n_days):
@@ -94,14 +98,16 @@ def get_transaction_summary(last_n_days):
         return error_response(404)
     else:
         # Determining cutoff_data based on the # of days sent in request.
-        trans_data['transactionDatetime'] = trans_data['transactionDatetime'].astype('datetime64[ns]')
-        cutoff_date = trans_data['transactionDatetime'].iloc[-1] - pd.Timedelta(days=last_n_days)
-        
-        # Processing to determine transaction amount summary at city level
-        trans_data = trans_data[trans_data.transactionDatetime > cutoff_date] 
-        trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
-        trans_data = pd.DataFrame(trans_data.groupby('productManufacturingCity').transactionAmount.sum())
-        trans_data = trans_data.reset_index()
-        trans_data = trans_data.rename(columns={"productManufacturingCity":"cityName","transactionAmount":"totalAmount"})
-        
-        return jsonify(summary=trans_data.to_dict('records'))
+        trans_data['transactionDatetime'] = pd.to_datetime(trans_data['transactionDatetime'])
+        cutoff_date = (datetime.now() - timedelta(days=last_n_days))
+        trans_data = trans_data[trans_data.transactionDatetime > cutoff_date]
+
+        # Processing to determine transaction amount summary at manufacturing city level 
+        if trans_data.empty:
+            return error_response(404)
+        else:
+            trans_data = pd.merge(trans_data,ref_data,on='productId',how='left',indicator=True)
+            trans_data = pd.DataFrame(trans_data.groupby('productManufacturingCity').transactionAmount.sum())
+            trans_data = trans_data.reset_index()
+            trans_data = trans_data.rename(columns={"productManufacturingCity":"cityName","transactionAmount":"totalAmount"})
+            return jsonify(summary=trans_data.to_dict('records'))
